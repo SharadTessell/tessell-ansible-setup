@@ -1,0 +1,138 @@
+
+---
+- name: Manage Oracle Databases on VMs
+  hosts: all
+  become: yes
+  vars:
+    oracle_home: "/u02/app/oracle/product/dbhome_1"
+    listener: "LISTENER"
+
+  tasks:
+    - name: Run Oracle database tasks as 'oracle' user
+      block:
+
+        - name: Check if /etc/oratab exists
+          stat:
+            path: /etc/oratab
+          register: oratab_check
+
+        - name: Fail if /etc/oratab does not exist
+          fail:
+            msg: "/etc/oratab file not found on this host!"
+          when: not oratab_check.stat.exists
+
+        - name: Read oratab to get Oracle Homes and SIDs
+          shell: "grep -E '^[^#]' /etc/oratab | awk -F: '{print $1, $2}'"
+          register: db_list
+          when: oratab_check.stat.exists
+
+        - name: Set Oracle SID and Home path
+          set_fact:
+            oracle_dbs: "{{ db_list.stdout_lines | map('split', ' ') | list }}"
+          when: db_list.stdout_lines | length > 0
+
+        - name: Check DB role for each database
+          shell: |
+            export ORACLE_HOME={{ item[1] }}
+            export ORACLE_SID={{ item[0] }}
+            export LD_LIBRARY_PATH=$ORACLE_HOME/lib
+            export PATH=$ORACLE_HOME/bin:$PATH
+            $ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+            SET HEADING OFF
+            SET PAGESIZE 0
+            SET LINESIZE 100
+            select DATABASE_ROLE from v\$database;
+            EXIT;
+            EOF
+          loop: "{{ oracle_dbs }}"
+          loop_control:
+            label: "{{ item[0] }}"
+          register: db_modes
+          become_user: oracle
+
+        - name: Debug Database Roles
+          debug:
+            msg: "Database {{ item.item[0] }} is {{ item.stdout }}"
+          loop: "{{ db_modes.results }}"
+          loop_control:
+            label: "{{ item.item[0] }}"
+          when: db_modes is defined
+
+        - name: Set database roles
+          set_fact:
+            db_roles: "{{ db_roles | default({}) | combine({item.item[0]: item.stdout}) }}"
+          loop: "{{ db_modes.results }}"
+          loop_control:
+            label: "{{ item.item[0] }}"
+
+        - name: Print database roles
+          debug:
+            msg: "Database {{ item.key }} is in {{ item.value }} mode on {{ inventory_hostname }}"
+          loop: "{{ db_roles | dict2items }}"
+
+        - name: Stop DB
+          shell: |
+            export ORACLE_HOME={{ item[1] }}
+            export ORACLE_SID={{ item[0] }}
+            export LD_LIBRARY_PATH=$ORACLE_HOME/lib
+            export PATH=$ORACLE_HOME/bin:$PATH
+            $ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+            SET HEADING OFF
+            SET PAGESIZE 0
+            SET LINESIZE 100
+            shutdown immediate;
+            EXIT;
+            EOF
+
+            lsnrctl stop
+          loop: "{{ oracle_dbs }}"
+          loop_control:
+            label: "{{ item[0] }}"
+          when: db_roles[item[0]] == "PRIMARY"
+          register: db_stop
+          become_user: oracle
+
+        - name: Pause for 60 seconds before start
+          pause:
+            seconds: 60
+
+        - name: Start DB
+          shell: |
+            export ORACLE_HOME={{ item[1] }}
+            export ORACLE_SID={{ item[0] }}
+            export LD_LIBRARY_PATH=$ORACLE_HOME/lib
+            export PATH=$ORACLE_HOME/bin:$PATH
+            $ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+            SET HEADING OFF
+            SET PAGESIZE 0
+            SET LINESIZE 100
+            startup;
+            EXIT;
+            EOF
+
+            lsnrctl start
+          loop: "{{ oracle_dbs }}"
+          loop_control:
+            label: "{{ item[0] }}"
+          when: db_roles[item[0]] == "PRIMARY"
+          register: db_start
+          become_user: oracle
+
+        - name: Check if both DB and listener were started successfully
+          set_fact:
+            db_listener_status: "{{ db_listener_status | default({}) | combine({item.item[0]: (item.rc == 0)}) }}"
+          loop: "{{ db_start.results }}"
+          loop_control:
+            label: "{{ item.item[0] }}"
+          when: item is defined and item.rc is defined
+
+
+        - name: Print final status
+          debug:
+            msg: "Database {{ item }} is {{ db_roles[item] }} and both DB and Listener have been started successfully."
+          when: db_listener_status[item] | default(false)
+          loop: "{{ db_roles.keys() }}"
+          loop_control:
+            label: "{{ item }}"
+
+      become_user: oracle

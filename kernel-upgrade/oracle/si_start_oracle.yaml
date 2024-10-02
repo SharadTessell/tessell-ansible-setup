@@ -1,0 +1,19 @@
+- name: Start each Oracle Database
+  shell: |
+    export ORACLE_HOME={{ item[1] }}
+    export ORACLE_SID={{ item[0] }}
+    export LD_LIBRARY_PATH=$ORACLE_HOME/lib
+    export PATH=$ORACLE_HOME/bin:$PATH
+
+    startup_output=$($ORACLE_HOME/bin/sqlplus / as sysdba <<EOF
+    STARTUP;
+    EXIT;
+    EOF
+    )
+
+    listener_start=$(lsnrctl start)
+
+    echo "{\"Startup_output\": \"$startup_output\", \"listener_output\": \"$listener_start\"}"
+  register: startup_output
+  loop: "{{ oracle_dbs }}"
+  become_user: oracle

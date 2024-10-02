@@ -1,0 +1,59 @@
+---
+- name: Check PostgreSQL role and modify crontab
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Check if the system is Primary or Replica (for ec2-user)
+      command: is_primary
+      register: is_primary_output
+      ignore_errors: true
+      become: yes
+      become_user: ec2-user
+
+    - name: Comment out dbRoleMonitor line in crontab if Primary or Replica
+      lineinfile:
+        path: /var/spool/cron/ec2-user
+        regexp: '^\\* \\* \\* \\* \\* is_primary && /usr/local/bin/tessell-python /opt/tessell-base/python/lib/python3.8/site-packages/tessell/plugin/database/postgres/tasks/utils/DbRoleMonitor.py status >> /tmp/tessell-logs/common/dbRoleMonitor.log'
+        line: '# * * * * * is_primary && /usr/local/bin/tessell-python /opt/tessell-base/python/lib/python3.8/site-packages/tessell/plugin/database/postgres/tasks/utils/DbRoleMonitor.py status >> /tmp/tessell-logs/common/dbRoleMonitor.log'
+        state: present
+      when: is_primary_output.stdout in ['Primary', 'Replica']
+
+    - name: Check if the system is Primary or Replica (for azureuser)
+      command: is_primary
+      register: is_primary_output_azure
+      ignore_errors: true
+      become: yes
+      become_user: azureuser
+
+    - name: Comment out dbRoleMonitor line in crontab if Primary or Replica (azureuser)
+      lineinfile:
+        path: /var/spool/cron/azureuser
+        regexp: '^\\* \\* \\* \\* \\* is_primary && /usr/local/bin/tessell-python /opt/tessell-base/python/lib/python3.8/site-packages/tessell/plugin/database/postgres/tasks/utils/DbRoleMonitor.py status >> /tmp/tessell-logs/common/dbRoleMonitor.log'
+        line: '# * * * * * is_primary && /usr/local/bin/tessell-python /opt/tessell-base/python/lib/python3.8/site-packages/tessell/plugin/database/postgres/tasks/utils/DbRoleMonitor.py status >> /tmp/tessell-logs/common/dbRoleMonitor.log'
+        state: present
+      when: is_primary_output_azure.stdout in ['Primary', 'Replica']
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

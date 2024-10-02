@@ -1,0 +1,12 @@
+- name: Cloud provider check
+  shell: "getent passwd azureuser"
+  register: azure_user_check
+  ignore_errors: yes
+
+- name: Set cloud provider based on user existence
+  set_fact:
+    cloud_provider: "{{ 'azure' if azure_user_check.rc == 0 else 'aws' }}"
+
+- name: Print cloud provider
+  debug:
+    msg: "Cloud provider identified: {{ cloud_provider }}"

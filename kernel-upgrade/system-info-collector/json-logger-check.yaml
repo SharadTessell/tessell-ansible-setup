@@ -1,0 +1,25 @@
+- name: Determine the default Python 3 interpreter for root
+  shell: "command -v python3"
+  register: python3_default_path
+  changed_when: false
+
+- name: Check if python-json-logger is installed
+  shell: "{{ python3_default_path.stdout }} -m pip show python-json-logger"
+  register: json_logger_check
+  ignore_errors: yes
+
+- name: Install python-json-logger if not present
+  shell: "{{ python3_default_path.stdout }} -m pip install python-json-logger==2.0.4"
+  when: json_logger_check.rc != 0
+  register: install_result
+
+- name: Report installation result
+  debug:
+    msg: >
+      {% if json_logger_check.rc == 0 %}
+        python-json-logger is already installed.
+      {% elif install_result.changed %}
+        python-json-logger has been successfully installed.
+      {% else %}
+        python-json-logger was not installed (no changes made).
+      {% endif %}

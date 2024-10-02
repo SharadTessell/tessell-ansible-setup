@@ -1,0 +1,4 @@
+- name: Start MySQL service
+  service:
+    name: mysqld
+    state: started
