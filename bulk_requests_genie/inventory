@@ -1,0 +1,1 @@
+amitnewforsharad_MySQL_8.0 ansible_host=localhost ansible_port=22001 ansible_user=ec2-user ansible_ssh_private_key_file=/Users/sharaddubey/PycharmProjects/Config_Management/tessell-ansible-setup/bulk_requests_genie/genie_bulk/genie_bulk_enable.pem

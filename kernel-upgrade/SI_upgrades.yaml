@@ -10,7 +10,8 @@
     - name: Check kernel upgrade eligibility
       fail:
         msg: "Not a RedHat system or already running on 8.10"
-      when: ansible_distribution != "RedHat" or ansible_distribution_version == "8.1"
+      when: ansible_distribution != "RedHat" or ansible_distribution_version == "8.10"
+
 
     - name: Cloud Validations
       include_tasks: system-info-collector/cloud-validation.yaml
@@ -122,12 +123,12 @@
         reboot_timeout: 3600
       when: can_reboot
 
-    - name: Get uptime
+    - name: Get new kernel version
       command: uname -r
       register: uname_output
       when: can_reboot
 
-    - name: Print uname
+    - name: Print new kernel version
       debug:
         msg: "New Kernel Version: {{ uname_output.stdout }}"
       when: can_reboot
