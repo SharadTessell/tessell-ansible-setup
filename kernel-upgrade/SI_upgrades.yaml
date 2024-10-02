@@ -12,6 +12,7 @@
         msg: "Not a RedHat system or already running on 8.10"
       when: ansible_distribution != "RedHat" or ansible_distribution_version == "8.10"
 
+
     - name: Cloud Validations
       include_tasks: system-info-collector/cloud-validation.yaml
 
