@@ -1,0 +1,145 @@
+---
+- name: Perform system checks and upgrade kernel
+  hosts: all
+  gather_facts: true
+  become: yes
+  tasks:
+
+
+    #Proceed only < RHEL 8.10
+    - name: Check kernel upgrade eligibility
+      fail:
+        msg: "Not a RedHat system or already running on 8.10"
+      when: ansible_distribution != "RedHat" or ansible_distribution_version == "8.1"
+
+    - name: Cloud Validations
+      include_tasks: system-info-collector/cloud-validation.yaml
+
+    - name: Interpreter validations
+      include_tasks: system-info-collector/interpreter.yaml
+
+    - name: Collecting pre-upgrade outputs
+      include_tasks: system-info-collector/pre-upgrade.yaml
+
+    #DB dir check
+    - name: Check if data directories exist
+      stat:
+        path: "{{ item }}"
+      register: db_checks
+      loop:
+        - /pgsql/data
+        - /u02/app/oracle/
+        - /mysql/data
+      no_log: true
+
+
+    - name: Set database type fact
+      set_fact:
+        db_type: >-
+          {% if db_checks.results[0].stat.exists %}
+          postgres
+          {% elif db_checks.results[1].stat.exists %}
+          oracle
+          {% elif db_checks.results[2].stat.exists %}
+          mysql
+          {% else %}
+          none
+          {% endif %}
+      register: db_type_fact
+      no_log: true
+
+    - name: Debug the identified database type
+      debug:
+        msg: "The running database is: {{ db_type.strip() }}"
+
+    - name: Stop MySQL service
+      include_tasks: mysql/si_stop_mysql.yaml
+      when: db_type.strip() == 'mysql'
+
+    - name: Stop PostgreSQL service
+      include_tasks: postgres/si_stop_pg.yaml
+      when: db_type.strip() == 'postgres'
+
+    - name: Stop Oracle service
+      include_tasks: oracle/si_stop_oracle.yaml
+      when: db_type.strip() == 'oracle'
+
+    - name: Set db_stop_success flag
+      set_fact:
+        db_stop_success: >-
+          {{ (db_type.strip() == 'mysql' and mysql_stop_result.changed) or
+             (db_type.strip() == 'postgres' and postgres_stop_result.rc == 0) or
+             (db_type.strip() == 'oracle' and stop_and_status_output.results | selectattr('stdout', 'search', 'OPEN') | list | length == 0) }}
+
+
+
+###################### KERNEL UPGRADE ######################
+
+    - name: Update all packages with YUM without GPG check
+      shell: "yum update --nogpgcheck -y"
+      ignore_errors: yes
+      register: yum_update_result
+
+    - debug:
+        var: yum_update_result
+
+############################ POST UPGRADE ######################
+
+    - name: Initialize kernel upgrade variables
+      set_fact:
+        kernel_is_upgraded: false
+        upgraded_kernel_version: ""
+
+    # Step 2: Report yum update result
+    - name: Check if kernel was upgraded
+      set_fact:
+        kernel_is_upgraded: "{{ 'Installing       : kernel' in yum_update_result.stdout }}"
+        #upgraded_kernel_version: "{{ yum_update_result.stdout | regex_search('kernel-(\\S+)', '\\1') | first }}"
+        upgraded_kernel_version: "{{ yum_update_result.stdout | regex_search('kernel\\s+x86_64\\s+(\\S+)', '\\1') | first }}"
+      when: "'Installing       : kernel' in yum_update_result.stdout"
+
+    - name: Print kernel upgrade status and version
+      debug:
+        msg: >
+          {% if kernel_is_upgraded %}
+            Kernel has been upgraded to version {{ upgraded_kernel_version }}.
+          {% else %}
+            Kernel was not upgraded.
+          {% endif %}
+
+
+    - name: json logger check
+      include_tasks: system-info-collector/json-logger-check.yaml
+
+    #Set reboot condition
+    - name: Set reboot condition
+      set_fact:
+        can_reboot: "{{ kernel_is_upgraded and json_logger_check.rc == 0 }}"
+
+
+    - name: Wait for server to restart
+      reboot:
+        reboot_timeout: 3600
+      when: can_reboot
+
+    - name: Get uptime
+      command: uname -r
+      register: uname_output
+      when: can_reboot
+
+    - name: Print uname
+      debug:
+        msg: "New Kernel Version: {{ uname_output.stdout }}"
+      when: can_reboot
+
+    - name: Start MySQL service if db_type is mysql
+      include_tasks: mysql/si_start_mysql.yaml
+      when: db_type.strip() == 'mysql'
+
+    - name: Start PostgreSQL service if db_type is postgres
+      include_tasks: postgres/si_start_pg.yaml
+      when: db_type.strip() == 'postgres'
+
+    - name: Start Oracle service if db_type is oracle
+      include_tasks: oracle/si_start_oracle.yaml
+      when: db_type.strip() == 'oracle'

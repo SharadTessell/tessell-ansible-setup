@@ -1,0 +1,34 @@
+- name: Read oratab to get Oracle Homes and SIDs
+  shell: "grep -E '^[^#]' /etc/oratab | awk -F: '{print $1, $2}'"
+  register: oratab_output
+
+- name: Set Oracle SID and Home path
+  set_fact:
+    oracle_dbs: "{{ oratab_output.stdout_lines | map('split') | list }}"
+
+- name: Stop each Oracle Database and check status
+  shell: |
+    export ORACLE_HOME={{ item[1] }}
+    export ORACLE_SID={{ item[0] }}
+    export LD_LIBRARY_PATH=$ORACLE_HOME/lib
+    export PATH=$ORACLE_HOME/bin:$PATH
+    shutdown_output=$($ORACLE_HOME/bin/sqlplus / as sysdba <<EOF
+    SHUTDOWN IMMEDIATE;
+    EXIT;
+    EOF
+    )
+    status_output=$(status_output=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+    SET HEADING OFF
+    SET PAGESIZE 0
+    SET LINESIZE 100
+    SELECT status FROM v\$instance;
+    EXIT;
+    EOF
+    ))
+    listener_stop=$(lsnrctl stop)
+    echo "{\"shutdown_output\": \"$shutdown_output\", \"status_output\": \"$status_output\", \"listener_output\": \"$listener_stop\"}"
+
+  register: stop_and_status_output
+  ignore_errors: yes
+  loop: "{{ oracle_dbs }}"
+  become_user: oracle

@@ -1,0 +1,4 @@
+- name: Stop PostgreSQL service using pg_ctl
+  shell: "/pgbin/bin/pg_ctl -D /pgsql/data/data stop"
+  become_user: postgres
+  register: postgres_stop_result

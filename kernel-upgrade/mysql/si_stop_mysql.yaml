@@ -1,0 +1,6 @@
+- name: Stop MySQL service
+  service:
+    name: mysqld
+    state: stopped
+  register: mysql_stop_result
+

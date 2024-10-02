@@ -1,0 +1,3 @@
+- name: Start PostgreSQL service using pg_ctl
+  shell: "/pgbin/bin/pg_ctl -D /pgsql/data/data start"
+  become_user: postgres

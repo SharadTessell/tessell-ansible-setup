@@ -1,0 +1,228 @@
+---
+- name: Perform system checks and upgrade kernel
+  hosts: all
+  gather_facts: true
+  become: yes
+  # vars:
+  #   ansible_python_interpreter: /usr/bin/python3.9  # Ensure this path is correct for your RHEL VM
+
+  tasks:
+
+
+
+
+#     # Step 2: Determine user based on cloud provider
+#     - name: Check if running on AWS
+#       command: "curl -s -m 2 http://169.254.169.254/latest/meta-data/"
+#       register: aws_check
+#       ignore_errors: yes
+#
+#     - name: Debug AWS Check Output
+#       debug:
+#         msg: "AWS check output: {{ aws_check.stdout }}"
+#       when: aws_check.rc == 0
+#
+#     - name: Check if running on Azure
+#       command: "curl -s -m 2 http://169.254.169.254/metadata/instance?api-version=2021-02-01 -H 'Metadata: true'"
+#       register: azure_check
+#       ignore_errors: yes
+#
+#     - name: Debug Azure Check Output
+#       debug:
+#         msg: "Azure check output: {{ azure_check.stdout }}"
+#       when: azure_check.rc == 0
+#
+#     - name: Set cloud provider fact
+#       set_fact:
+#         cloud_provider: >
+#           {%- if aws_check.rc == 0 and 'ami-id' in aws_check.stdout %}
+#             aws
+#           {%- else azure_check.rc == 0 and 'AzurePublicCloud' in azure_check.stdout%}
+#             azure
+#           {%- endif %}
+#
+#     - name: Print cloud provider
+#       debug:
+#         msg: "Cloud provider identified: {{ cloud_provider | trim }}"
+#
+#
+#     - set_fact:
+#         cloud_user: "{{ 'ec2-user' if (cloud_provider | trim) == 'aws' else 'azureuser' }}"
+#
+#     - name: Print chosen user
+#       debug:
+#         msg: "Using user: {{ cloud_user }}"
+#
+
+    # Step 1: Gather system information (Commented out for now)
+    # - name: Gather system information
+    #   shell: |
+    #     echo "fstab:"
+    #     cat /etc/fstab
+    #     echo ""
+    #     echo "Disk usage:"
+    #     df -h
+    #     echo ""
+    #     echo "Block devices:"
+    #     lsblk
+    #     echo ""
+    #     echo "Logical volumes:"
+    #     lvs
+    #     echo ""
+    #     echo "Physical volumes:"
+    #     pvs
+    #     echo ""
+    #     echo "Volume groups:"
+    #     vgs
+    #     echo ""
+    #     echo "Kernel and OS info:"
+    #     uname -a
+    #   register: system_info_output
+
+    # Step 2: Check for Python versions
+    - name: Check for Python 3.9
+      command: /usr/bin/python3.9 --version
+      register: python39
+      ignore_errors: true
+
+    - name: Check for Python 3.11
+      command: /usr/bin/python3.11 --version
+      register: python311
+      ignore_errors: true
+
+    - name: Set ansible_python_interpreter
+      set_fact:
+        ansible_python_interpreter: >-
+          {{ '/usr/bin/python3.9' if python39.rc == 0 else
+             '/usr/bin/python3.11' if python311.rc == 0 else
+             '/usr/bin/python3.6' }}
+
+    - name: Print the chosen Python interpreter
+      debug:
+        msg: "Using Python interpreter: {{ ansible_python_interpreter }}"
+
+    - name: Execute your task
+      command: echo "Running with the selected Python interpreter"
+
+    # Step 3: Determine the running database based on directory presence
+    - name: Check if PostgreSQL data directory exists
+      stat:
+        path: /pgsql/data
+      register: postgres_check
+
+    - name: Check if Oracle data directory exists
+      stat:
+        path: /u02/app/oracle/
+      register: oracle_check
+
+    - name: Check if MySQL data directory exists
+      stat:
+        path: /mysql/data
+      register: mysql_check
+
+    # Step 4: Set the database type based on checks
+    - name: Set database type fact
+      set_fact:
+        db_type: >-
+          {% if postgres_check.stat.exists %}
+          postgres
+          {% elif oracle_check.stat.exists %}
+          oracle
+          {% elif mysql_check.stat.exists %}
+          mysql
+          {% else %}
+          none
+          {% endif %}
+      register: db_type_fact
+
+
+    - name: Debug the identified database type
+      debug:
+        msg: "The running database is: {{ db_type.strip() }}"
+
+    # Step 5: Perform DB-specific tasks (Oracle)
+    - block:
+        - name: Read oratab to get Oracle Homes and SIDs
+          shell: "grep -E '^[^#]' /etc/oratab | awk -F: '{print $1, $2}'"
+          register: oratab_output
+
+        - name: Set Oracle SID and Home path
+          set_fact:
+            oracle_dbs: "{{ oratab_output.stdout_lines | map('split') | list }}"
+
+        - name: Stop each Oracle Database and check status
+          shell: |
+            export ORACLE_HOME={{ item[1] }}
+            export ORACLE_SID={{ item[0] }}
+            export LD_LIBRARY_PATH=$ORACLE_HOME/lib
+            export PATH=$ORACLE_HOME/bin:$PATH
+
+            shutdown_output=$($ORACLE_HOME/bin/sqlplus / as sysdba <<EOF
+            SHUTDOWN IMMEDIATE;
+            EXIT;
+            EOF
+            )
+
+            status_output=$(echo "SET HEADING OFF; SET PAGESIZE 0; SET LINESIZE 100; SELECT status FROM v\$instance;" | $ORACLE_HOME/bin/sqlplus -s / as sysdba)
+
+            echo "Shutdown Output:"
+            echo "$shutdown_output"
+            echo "Status Output:"
+            echo "$status_output"
+          register: stop_and_status_output
+          ignore_errors: yes
+          loop: "{{ oracle_dbs }}"
+          become_user: oracle
+
+        - name: Fail if any Oracle database did not stop
+          fail:
+            msg: "The Oracle Database {{ item.item[0] }} did not stop successfully."
+          when: "'OPEN' in item.stdout"
+          loop: "{{ stop_and_status_output.results }}"
+      when: db_type.strip() == 'oracle'
+
+
+    # Step 6: Check if python-json-logger is available for azureuser
+    - name: Check python-json-logger installation for chosen user (ec2-user/azureuser)
+      command: "pip3 show python-json-logger"
+      register: cloud_user_logger_check
+      ignore_errors: yes
+      become: no
+
+    - name: Check python-json-logger installation for root
+      command: "pip3 show python-json-logger"
+      register: root_logger_check
+      ignore_errors: yes
+
+    # Step 7: Install python-json-logger if missing
+    - name: Install python-json-logger for azureuser if missing
+      command: "pip3 install python-json-logger==2.0.4"
+      when: azureuser_logger_check.rc != 0
+      become: no
+
+    - name: Install python-json-logger for root if missing
+      command: "pip3 install python-json-logger==2.0.4"
+      when: root_logger_check.rc != 0
+
+    # Step 8: Validate installation for both users
+    - name: Recheck python-json-logger installation for azureuser
+      command: "pip3 show python-json-logger"
+      register: azureuser_logger_check_post
+      ignore_errors: yes
+      become: no
+
+    - name: Recheck python-json-logger installation for root
+      command: "pip3 show python-json-logger"
+      register: root_logger_check_post
+      ignore_errors: yes
+
+    # Step 9: Set condition for reboot message
+    - name: Determine if both users have python-json-logger installed
+      set_fact:
+        can_reboot: "{{ azureuser_logger_check_post.rc == 0 and root_logger_check_post.rc == 0 }}"
+
+    # Step 10: Print message instead of rebooting
+    - name: Print reboot message if both users have python-json-logger installed
+      debug:
+        msg: "I WILL REBOOT"
+      when: can_reboot

@@ -1,0 +1,30 @@
+    - name: Gather system information
+      shell: |
+        echo "RedHat Release:"
+        cat /etc/redhat-release
+        echo "#################################################################################"
+        echo "fstab:"
+        cat /etc/fstab
+        echo "#################################################################################"
+        echo "Disk usage:"
+        df -h
+        echo "#################################################################################"
+        echo "Block devices:"
+        lsblk
+        echo "#################################################################################"
+        echo "Logical volumes:"
+        lvs
+        echo "#################################################################################"
+        echo "Physical volumes:"
+        pvs
+        echo "#################################################################################"
+        echo "Volume groups:"
+        vgs
+        echo "#################################################################################"
+        echo "Kernel and OS info:"
+        uname -a
+      register: system_info_output
+
+    - name: Display system information output
+      debug:
+        msg: "{{ system_info_output.stdout_lines }}"

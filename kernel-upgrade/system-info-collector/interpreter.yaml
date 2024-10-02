@@ -1,0 +1,21 @@
+---
+- name: Check for Python 3.9
+  command: /usr/bin/python3.9 --version
+  register: python39
+  ignore_errors: true
+
+- name: Check for Python 3.11
+  command: /usr/bin/python3.11 --version
+  register: python311
+  ignore_errors: true
+
+- name: Set ansible_python_interpreter
+  set_fact:
+    ansible_python_interpreter: >-
+      {{ '/usr/bin/python3.9' if python39.rc == 0 else
+         '/usr/bin/python3.11' if python311.rc == 0 else
+         '/usr/bin/python3.6' }}
+
+- name: Print the chosen Python interpreter
+  debug:
+    msg: "Using Python interpreter: {{ ansible_python_interpreter }}"
